@@ -3,7 +3,7 @@
 # Skript        : check_hmc_by_ssh.sh
 # Description   : Checks state of a HMC or of its managed systems
 #
-# Read the help instructions for more informations
+# Read the help instructions for more information
 #-------------------------------------------------------------------------------
 # Copyright (c) 2013 PROFI AG, Martin Rueckert (m.rueckert@profi-ag.de)
 #
