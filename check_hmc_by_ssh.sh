@@ -6,6 +6,7 @@
 # Read the help instructions for more information
 #-------------------------------------------------------------------------------
 # Copyright (c) 2013 PROFI AG, Martin Rueckert (m.rueckert@profi-ag.de)
+# Copyright (c) 2018 PROFI AG, Dominik Keil (d.keil@profi-ag.de)
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -45,9 +46,12 @@
 #        Added Exclude-Option and some minor changes
 # 1.2   2015-02-23 - Martin Rueckert (m.rueckert@profi-ag.de)
 #        LPARRUN: Added additional informations about assigned CPUs & Mem
+# 1.3   2018-01-05 - Dominik Keil (d.keil@profi-ag.de)
+#        Adding parameter for providing an arbitrary SSH key
+#        Adding parameter for providing an arbitrary SSH username
 #-------------------------------------------------------------------------------
 PROGNAME="check_hmc_by_ssh.sh"
-VERSION="1.2"
+VERSION="1.3"
 
 # Variables (Part 1)
 debug=0
@@ -79,6 +83,8 @@ print_usage
 cat <<EOFHELP
 
     -h    Shows this help
+    -i    path to non-default SSH private key
+    -u    username to log in with
     -I    IP Address of HMC
     -1    IP Address of first HMC
     -2    IP Address of second HMC
@@ -158,12 +164,15 @@ function filterObj {
 # GET ARGUMENTS, CHECK THEM AND EVALUATE
 ################################################################################
 
+SSHUSER=""
 # get arguments
-while getopts 'hdI:1:2:C:A:w:c:E:' OPT; do
+while getopts 'hdi:u:I:1:2:C:A:w:c:E:' OPT; do
   case $OPT in
     h)  print_help
         exit 0;;
     d)  debug=1;;
+    i)  if [ -e $OPTARG ]; then SSHPRIVKEY="-i $OPTARG"; else SSHPRIVKEY=""; fi;;
+    u)  SSHUSER="${OPTARG}@";;
     I)  machine=$OPTARG;;
     1)  machine1=$OPTARG;;
     2)  machine2=$OPTARG;;
@@ -271,7 +280,7 @@ case $checkType in
         counterDown=0
         echo -ne "OVERVIEW from HMC\n\n"
         hmcCommand="lssyscfg -r sys -F name,type_model,serial_num,ipaddr"
-        /usr/bin/ssh $machine "$hmcCommand" > $CmdOutFile
+        /usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" > $CmdOutFile
         if [ $? -eq 0 ]; then
                 systemsList=""
                 echo -ne "Managed Server\n"
@@ -287,7 +296,7 @@ case $checkType in
                 for managedSys in $systemsList
                 do
                         hmcCommandL="lssyscfg -r lpar -m $managedSys -F name,lpar_id,state,os_version,logical_serial_num,rmc_ipaddr"
-                        /usr/bin/ssh $machine "$hmcCommandL" > $CmdOutFileLpar
+                        /usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL" > $CmdOutFileLpar
                         if [ -s $CmdOutFileLpar ]; then
                                 echo -ne "LPARs on $managedSys\n"
                                 while read lineL
@@ -313,7 +322,7 @@ case $checkType in
     HMCDISKS)
         hmcCommand="monhmc -r disk -n 0"
     	# execute and grep only real devices:
-        RESULT=`/usr/bin/ssh $machine "$hmcCommand" | grep "^/dev/" > $CmdOutFile`
+        RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" | grep "^/dev/" > $CmdOutFile`
         if [ -s $CmdOutFile ]; then		# file exists and has a size greater than zero
                 while read line
                 do
@@ -341,7 +350,7 @@ case $checkType in
     HMCUPTIME)
         hmcCommand="cat /proc/uptime"
 	
-        uptimehmc=`/usr/bin/ssh $machine "$hmcCommand" | cut -f 1 -d .`
+        uptimehmc=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" | cut -f 1 -d .`
         if (( $uptimehmc < $CRITthreshold )); then
                 exitCode=2	# CRITICAL
         fi
@@ -350,7 +359,7 @@ case $checkType in
     HMCMEM)
         hmcCommand="monhmc -r mem -n 0"
 	
-        RESULT=`/usr/bin/ssh $machine "$hmcCommand"`
+        RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand"`
     	#Example output: "Mem:   4095732k total,  2989948k used,  1105784k free,   445448k buffers"
 	memTotl=`echo $RESULT | cut -d ' ' -f2 | sed 's/k$//'`
 	memUsed=`echo $RESULT | cut -d ' ' -f4 | sed 's/k$//'`
@@ -365,7 +374,7 @@ case $checkType in
     HMCSWAP)
         hmcCommand="monhmc -r swap -n 0"
 	
-        RESULT=`/usr/bin/ssh $machine "$hmcCommand"`
+        RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand"`
     	#Example output: "Swap:  2040244k total,    42836k used,  1997408k free,  1808320k cached"
 	swapTotl=`echo $RESULT | cut -d ' ' -f2 | sed 's/k$//'`
 	swapUsed=`echo $RESULT | cut -d ' ' -f4 | sed 's/k$//'`
@@ -387,7 +396,7 @@ case $checkType in
 	#"Cpu1  :  0.3%us,  0.3%sy,  0.0%ni, 99.3%id,  0.0%wa,  0.0%hi,  0.0%si,  0.0%st"
 	
 	# cut only idel values and put them in an array:
-        ValueArray=(`/usr/bin/ssh $machine "$hmcCommand" | cut -d\, -f4 | sed 's/\%id//g ; s/ //g' | tr "\n" " "`)
+        ValueArray=(`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" | cut -d\, -f4 | sed 's/\%id//g ; s/ //g' | tr "\n" " "`)
 	NUMprocs=${#ValueArray[*]}
 	for ((i=0; i<$NUMprocs; i++))
 	do
@@ -412,7 +421,7 @@ case $checkType in
 	sectionline="------------------------------------------------------------"
 
 	hmcCommand="lssyscfg -r sys -F name"
-	/usr/bin/ssh $machine "$hmcCommand" > $CmdOutFile
+	/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" > $CmdOutFile
 	if [ $? -eq 0 ]; then
 		systemsList="`cat $CmdOutFile | tr '\n' ' '`"
 		
@@ -420,7 +429,7 @@ case $checkType in
 		do
     			hmcCommandL="lsled -r sa -m ${managedSys} -t"
     			
-    			RESULT=`/usr/bin/ssh $machine "$hmcCommandL phys"`
+    			RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL phys"`
     			PhysLED="off"
     			if [ -n "`echo $RESULT | grep 'state=on'`" ] ; then
     				[ -z "$EXCLUDE" ] && counterON=$(( $counterON + 1 ))
@@ -431,7 +440,7 @@ case $checkType in
 			RestLen=`expr 44 - $NameLen`
     			printf "\n--- Managed System: %s %-.${RestLen}s\n" ${managedSys} $sectionline >> $ResultOutFile
     
-    			RESULT=`/usr/bin/ssh $machine "$hmcCommandL virtualsys"`
+    			RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL virtualsys"`
     			VirtLED="off"
     			if [ -n "`echo $RESULT | grep 'state=on'`" ] ; then
     				VirtLED="ON !!!"
@@ -440,7 +449,7 @@ case $checkType in
     			echo " -> Physical SA LED = $PhysLED  |  Virtual SA LED = $VirtLED" >> $ResultOutFile
     			
 			echo -e "\nVirtual partition SA LEDs:" >> $ResultOutFile
-    			RESULT=`/usr/bin/ssh $machine "$hmcCommandL virtuallpar" >> $CmdOutFileSys`
+    			RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL virtuallpar" >> $CmdOutFileSys`
     			while read line2
     			do
     				IFS=',' read -a LparArray <<< "${line2}"
@@ -473,7 +482,7 @@ case $checkType in
         hmcCommand="lssvcevents -t hardware --filter status=open"
 	echo -e "\n" > $ResultOutFile
 	# get events and format output (additional nl after each entry, nl for each ','
-	/usr/bin/ssh $machine "$hmcCommand" | sed 's/$/\n/g ; s/\,/\n/g' >> $ResultOutFile
+	/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" | sed 's/$/\n/g ; s/\,/\n/g' >> $ResultOutFile
 	exitstatus=$?
 	numevents=`cat $ResultOutFile | grep "^problem_num" | wc -l`
         if [ $exitstatus -gt 0] ; then
@@ -495,13 +504,13 @@ case $checkType in
     		exitCode=3	# UNKNOWN
     	else
 		hmcCommand="lssyscfg -r sys -F name,state,serial_num,ipaddr"
-		/usr/bin/ssh $machine "$hmcCommand" > $CmdOutFile
+		/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" > $CmdOutFile
 		if [ $? -eq 0 ]; then
 			RESULT=`cat $CmdOutFile | grep "$ATTRIBUTE"`
 			if [ -n "$RESULT" ] ; then
 				IFS=',' read -a ValueArray <<< "${RESULT}"
 				OUTPUT="${ValueArray[0]} is ${ValueArray[1]} (S/N ${ValueArray[2]}, IP '${ValueArray[3]}')"
-				avgRTT=`ssh $machine "ping ${ValueArray[3]} -c 3" | tail -n 1 | cut -d/ -f5`
+				avgRTT=`ssh $SSHPRIVKEY ${SSHUSER}${machine} "ping ${ValueArray[3]} -c 3" | tail -n 1 | cut -d/ -f5`
 			else
 				OUTPUT="No information about System available! HMC output: `cat $CmdOutFile`"
 				exitCode=3	# UNKNOWN
@@ -522,14 +531,14 @@ case $checkType in
     		exitCode=3	# UNKNOWN
     	else
 		hmcCommand="lssyscfg -r sys -F name"
-		/usr/bin/ssh $machine "$hmcCommand" > $CmdOutFile
+		/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" > $CmdOutFile
 		if [ $? -eq 0 ]; then
 			systemsList="`cat $CmdOutFile | tr '\n' ' '`"
 			
 			for managedSys in $systemsList
 			do
 				hmcCommandL="lssyscfg -r lpar -m $managedSys -F name,lpar_id,state,os_version --filter \"lpar_names=$ATTRIBUTE\""
-				RESULT=`/usr/bin/ssh $machine "$hmcCommandL"`
+				RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL"`
 				IFS=',' read -a ValueArray <<< "${RESULT}"
 				if [ "${ValueArray[0]}" = "$ATTRIBUTE" ]; then	# System found? (could be an error message as well)
 					if [ "${ValueArray[2]}" != "Running" ]; then
@@ -539,12 +548,12 @@ case $checkType in
 					
 					# Get some additional informations:
 					hmcCommandL="lshwres -r proc -m $managedSys --level lpar --filter \"lpar_names=$ATTRIBUTE\" -F lpar_id,curr_min_proc_units,curr_proc_units,curr_max_proc_units"
-					RESULT=`/usr/bin/ssh $machine "$hmcCommandL"`
+					RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL"`
 					IFS=',' read -a CpuArray <<< "${RESULT}"
 					OUTPUT="$OUTPUT\ncurr_min_proc_units=${CpuArray[1]}, curr_proc_units=${CpuArray[2]}, curr_max_proc_units=${CpuArray[3]}"
 					
 					hmcCommandL="lshwres -r mem -m $managedSys --level lpar --filter \"lpar_names=$ATTRIBUTE\" -F lpar_id,curr_min_mem,curr_mem,curr_max_mem"
-					RESULT=`/usr/bin/ssh $machine "$hmcCommandL"`
+					RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL"`
 					IFS=',' read -a MemArray <<< "${RESULT}"
 					CURR_MIN_MEM=`expr ${MemArray[1]} \/ 1024`
 					CURR_MEM=`expr ${MemArray[2]} \/ 1024`
@@ -573,7 +582,7 @@ case $checkType in
 		LPARlist="`echo ${ATTRIBUTE} | tr ',' ' '`"
 
 		hmcCommand="lssyscfg -r sys -F name"
-		/usr/bin/ssh $machine "$hmcCommand" > $CmdOutFile
+		/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommand" > $CmdOutFile
 		if [ $? -eq 0 ]; then
 			systemsList="`cat $CmdOutFile | tr '\n' ' '`"
 			RUNsum=0
@@ -583,7 +592,7 @@ case $checkType in
 				for managedSys in $systemsList
 				do
 					hmcCommandL="lssyscfg -r lpar -m $managedSys -F name,state --filter \"lpar_names=$LPAR\""
-					RESULT=`/usr/bin/ssh $machine "$hmcCommandL"`
+					RESULT=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$hmcCommandL"`
 					IFS=',' read -a ValueArray <<< "${RESULT}"
 					if [ "${ValueArray[0]}" = "$LPAR" ]; then	# System found? (could be an error message as well)
 						if [ "${ValueArray[1]}" = "Running" ]; then
@@ -618,7 +627,7 @@ case $checkType in
     		exitCode=3	# UNKNOWN
         else
                 mycommandL="lssyscfg -r lpar -m $ATTRIBUTE -F lpar_id"
-                myresult=`/usr/bin/ssh $machine "$mycommandL" > $CmdOutFileLpar`
+                myresult=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$mycommandL" > $CmdOutFileLpar`
                 if [ $? -eq 0 ]; then
                         LparIDs=`cat $CmdOutFileLpar | tr '\n' ' '`
                         for LparID in $LparIDs
@@ -626,13 +635,13 @@ case $checkType in
                                 IFS=',' read -a variablesArrayL <<< "${lineL}"
 
                                 mycommandT="lshwres -r proc -m $ATTRIBUTE --level lpar -F curr_proc_mode,curr_proc_units --filter lpar_ids=$LparID"
-                                tmp_output=`/usr/bin/ssh $machine "$mycommandT"`
+                                tmp_output=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$mycommandT"`
                                 IFS=',' read -a tmpArray <<< "$tmp_output"
                                 curr_proc_mode="${tmpArray[0]}"
                                 curr_proc_units="${tmpArray[1]}"
 
                                 mycommand="lslparutil -m $ATTRIBUTE -r lpar -F time,lpar_id,capped_cycles,uncapped_cycles,entitled_cycles,idle_cycles,time_cycles,lpar_name --filter lpar_ids=$LparID -n 11"
-                                myresult=`/usr/bin/ssh $machine "$mycommand" > $CmdOutFile`
+                                myresult=`/usr/bin/ssh $SSHPRIVKEY ${SSHUSER}${machine} "$mycommand" > $CmdOutFile`
                                 if [ -s $CmdOutFile ]; then
                                         firstLine=`head -n 1 $CmdOutFile`
                                         secondLine=`tail -n 1 $CmdOutFile`
